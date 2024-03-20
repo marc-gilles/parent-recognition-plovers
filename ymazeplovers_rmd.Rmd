@@ -1,0 +1,630 @@
+---
+title: |
+  | **Can chicks smell their parents? No evidence of olfactory parent recognition in a shorebird**
+  |
+  | R code
+author: "*M. Gilles, S. Zefania, T. J. Mijoro, I. C. Cuthill, T. Székely & B. A. Caspers*"
+output: 
+  pdf_document: 
+    toc: true # to generate a table of contents
+    toc_depth: 3 # up to three depths of headings (specified by #, ## and ###)
+    number_sections: true  ## if you want number sections at each table header
+    latex_engine: xelatex
+  html_document: default
+header-includes: 
+ \usepackage{float}
+ \floatplacement{figure}{H} # for the position of figures/plots
+---
+
+```{r global-options, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE) 
+# settings for the whole documents: no message and no warning will be displayed
+```
+
+\newpage
+
+Required packages
+
+```{r results='hide'}
+library(ggplot2) # for plotting
+library(ggpubr) # for plotting(ggqqplot)
+library(lemon) # for plotting (coord_capped_cart)
+library(dplyr)
+library(glmmTMB) # to run beta regressions
+library(lme4) # to run mixed models (GLMM)
+library(broom.mixed) # to get confidence intervals for fixed effects
+library(performance) # to test models and more
+```
+
+# Data
+
+## Data for analysis
+
+*In the data used for the analysis, each row corresponds to a trial.*\
+
+Import data
+```{r, results = 'hide'}
+data <- read.csv("ymazeplovers_data_horizontal.csv")
+```
+
+Check data
+```{r, results = 'hide'}
+str(data)
+```
+
+Convert variables that need to be converted
+```{r, results = 'hide'}
+data$trial_type <- as.factor(data$trial_type)
+data$nest <- as.factor(as.character(data$nest))
+data$first_type <- as.factor(data$first_type)
+```
+
+For two chicks, trial A was unsuccessful and was repeated one day later. Remove the first trial of each chick (76 trials - 2 = 74 trials) so that we have no repeated data for each chick.
+```{r}
+data <- data[data$trial != "19A" & data$trial != "20A",]
+```
+
+Calculate the proportion of time spent with unrelated adult odour relative to time spent with both odours
+```{r, results = 'hide'}
+data$prop_dur_np <- data$np_duration/(data$left_duration+data$right_duration)
+```
+
+*Chicks participated in two consecutive trials:*\
+*- Conspecific odour discrimination (trial A): unrelated adult odour vs no odour*\
+*- Parent odour discrimination (trial B): unrelated adult odour vs parent odour*\
+
+### Data for conspecific odour discrimination (trial A)
+
+Subset data on successful trials A (N = 29)
+```{r, results = 'hide'}
+data_a <- data[data$trial_type == "A" & data$trial_success == 1,]
+```
+
+Subset data excluding trials where the sex of the unrelated adult odour is unknown (N = 29 - 1 = 28)
+```{r, results = 'hide'}
+data_a_sex <- data_a[!is.na(data_a$np_sex),]
+```
+
+Sex of unrelated parent odours used in trials A
+```{r}
+table(data_a$np_sex)
+```
+
+### Data for parent odour discrimination (trial B) 
+
+Subset data on successful trials B (N = 24)
+```{r, results = 'hide'}
+data_b <- data[data$trial_type == "B" & data$trial_success == 1,]
+```
+
+Subset data excluding trials where the sex of the odour (unrelated adult or parent) is unknown (N = 24 - 1 = 23)
+```{r, results = 'hide'}
+data_b_sex <- data_b[!is.na(data_b$np_sex) & !is.na(data_b$p_sex),]
+```
+
+Sex of odours (unrelated adult or parent) used in trials B
+```{r}
+table(data_b$p_sex, data_b$np_sex, deparse.level = 2)
+```
+
+Create a new variable describing the combination of sex of odours (parent and unrelated adult odour) used in trials B
+```{r}
+data_b_sex$odour_sex_comb <- paste(data_b_sex$p_sex,data_b_sex$np_sex)
+table(data_b_sex$odour_sex_comb)
+```
+
+### Preference measures
+
+*To measure the preference of the chicks to the different odours (trial A: unrelated adult vs control, trial B: unrelated vs parent), we test used two measures: time spent with odour and odour visited first.*
+
+*1. Time spent with odour (overall preference): proportion of time spent with unrelated adult odour relative to time spent with both odours*
+
+*For trial A:*\
+- *values > 0.5 indicate a preference (more time spent) for the unrelated adult odour*\
+- *values < 0.5 indicate a preference (more time spent) for the control*\
+
+*For trial B:*\
+- *values > 0.5 indicate a preference (more time spent) for the unrelated adult odour*\
+- *values < 0.5 indicate a preference (more time spent) for the parent odour*\
+
+*2. Odour visited first (first choice)*
+
+*The odour visited first may indicate a preference for that odour.*\
+
+
+Check whether the preference measures are independent:
+
+In trials A, is the time spent with an odour related to whether this odour was visited first?
+```{r}
+t.test(data_a[data_a$first_type=="np",]$prop_dur_np, data_a[data_a$first_type=="c",]$prop_dur_np)
+```
+
+*In trials A, chicks spent more time with the odour they visited first (i.e. the measures are not independent)*\
+
+In trials B, is the time spent with an odour related to whether this odour was visited first?
+```{r}
+t.test(data_b[data_b$first_type=="np",]$prop_dur_np, data_a[data_b$first_type=="p",]$prop_dur_np)
+```
+
+*In trials B, chicks did not spend more time with the odour they visited first (i.e. measures are independent).*\
+
+### Details on trials
+
+Number of trials
+```{r}
+nrow(data)
+```
+
+Success rate of each type of trial
+```{r}
+table(data$trial_type,data$trial_success)
+```
+
+Number of chicks tested
+```{r}
+length(unique(data$chick))
+sum(duplicated(data$chick)) 
+```
+*44 chicks were tested in total, among which 30 participated in both trial A and B and 14 participated in trial A only.*\
+
+Number of families tested
+```{r}
+length(unique(data$nest))
+```
+
+*From 33 families (1 chick per family in 22 families, 2 chicks per family in 11 families).*\
+
+Sex of the chicks
+```{r}
+table(data[data$trial_type == "A",]$sex)
+```
+
+Age of the chicks
+```{r}
+summary(data[data$trial_type == "A",]$age)
+sd(data[data$trial_type == "A",]$age)
+```
+
+Number of odours used in trials
+```{r}
+length(unique(unlist(c(data$left_id,data$right_id))))
+```
+Number of times each odour was used (mean & SD)
+```{r}
+data.frame(mean(c(data$np_used,data$p_used), na.rm = T),sd(c(data$np_used,data$p_used), na.rm = T))
+```
+
+Number of days before an unrelated adult odour was used in a trial (mean & SD)
+```{r}
+data.frame(mean(data$trial_np_diffdate), sd(data$trial_np_diffdate))
+```
+
+Number of days before a parent odour was used in a trial (mean & SD)
+```{r}
+data.frame(mean(data$trial_p_diffdate, na.rm = T), sd(data$trial_p_diffdate,na.rm = T))
+```
+
+## Data for plot
+
+*In the data used for the plot, each row corresponds to an arm of the Y-maze during a trial.*\
+
+Import data
+```{r, results = 'hide'}
+data_plot <- read.csv("ymazeplovers_data_vertical.csv")
+```
+
+Prepare data
+```{r, results = 'hide'}
+# keep only rows on left and right arm
+data_plot <- subset(data_plot,maze_area=="left" | maze_area=="right")
+# keep only successful trials
+data_plot <- data_plot[data_plot$trial_success==1,]
+```
+
+
+# Analysis
+
+## Conspecific odour discrimination (trial A)
+
+### Time spent with odour
+
+Mean time (and SD) spent by chicks in each arm
+```{r}
+mean_np <- mean(data_a$np_duration)
+sd_np <- sd(data_a$np_duration)
+mean_c <- mean(data_a$c_duration)
+sd_c <- sd(data_a$c_duration)
+data.frame(Variable = c("Time spent with unfamiliar adult odour (s)", "Time spent with no odour (s)"),
+           Mean = c(mean_np, mean_c),
+           SD = c(sd_np, sd_c))
+
+```
+
+Verify that the response variable is normally distributed
+```{r, fig.dim = c(6, 2.5), fig.align="center"}
+x <- ggplot(data_a, aes(x=prop_dur_np)) + 
+  geom_histogram(binwidth=0.2, alpha=.2, fill="black") + 
+  theme_classic() + ggtitle("Histogram") + 
+  xlab("Proportion of time spent with \n unrelated adult odour") + ylab("Count")
+y <- ggqqplot(data_a$prop_dur_np, color = "black") +
+  theme_classic() + ggtitle("Q-Q plot")
+ggarrange(x, y, ncol = 2, nrow = 1)
+```
+
+Verify that there is no outlier
+```{r}
+check_outliers(data_a$prop_dur_np)
+```
+
+T-test (two-tailed one sample)
+```{r}
+t.test(data_a$prop_dur_np, mu = 0.5, alternative = "two.sided")
+```
+
+*Chicks spent has much time in the arm with the unrelated adult odour as in the arm with no odour, they showed no preference.*\
+
+To run a beta regression, we need to transform the response variable (proportion of time spent with the unrelated adult odour) so that it does not include any 0 or 1.
+
+Transformation (y*(n-1)+0.5)/n (y: response variable, n: sample size; Smithson and Verkuilen 2006)
+```{r}
+data_a_sex$prop_dur_np_transf<-(data_a_sex$prop_dur_np*(nrow(data_a_sex)-1)+0.5)/nrow(data_a_sex)
+```
+
+Beta regression to test for the effect of sex and freshness of the test odour
+```{r}
+beta_dur_a <- glmmTMB(prop_dur_np_transf ~  np_sex + trial_np_diffdate, data = data_a_sex,
+               family = beta_family(link = "logit"))
+summary(beta_dur_a)
+```
+
+Beta estimates (with confidence intervals) of fixed effects
+```{r}
+broom.mixed::tidy(beta_dur_a, conf.int = TRUE) 
+```
+
+*The sex and the freshness of the unrelated adult odour had no effect on the time spent with the unrelated adult odour.*\
+
+Check model assumptions
+```{r, fig.dim = c(8, 6), fig.align="center"}
+check_model(beta_dur_a)
+```
+
+Verify that there is no side bias: create the response variable (proportion of time spent on the left side) and run a one-sample t-test
+```{r}
+data_a$prop_left <- data_a$left_duration/(data_a$left_duration + data_a$right_duration)
+t.test(data_a$prop_left, mu = 0.5, alternative = "two.sided")
+```
+
+*There was no significant side bias in the time spent in the test arms.*\
+
+
+### Odour visited first
+
+Distribution of the response variable (binary)
+```{r}
+table(data_a$first_type)
+```
+
+Two-tailed binomial test
+```{r}
+binom.test(sum(data_a$first_type=="np"), nrow(data_a), p = 0.5, alternative = "two.sided")
+```
+
+*Chicks did not visit first the arm with the unrelated adult odour more than the arm with no odour.*\
+
+GLM (binomial)
+```{r}
+glm_first_a <- glm(first_type ~ np_sex + trial_np_diffdate, data = data_a_sex, 
+                   family = binomial(link = "logit"))
+summary(glm_first_a)
+```
+
+Beta estimates (with confidence intervals) of fixed effects
+```{r}
+broom.mixed::tidy(glm_first_a, conf.int = TRUE)
+```
+
+*The sex and the freshness of the unrelated adult odour had no effect on which odour they visited first.*\
+
+Check model assumptions
+```{r, fig.dim = c(8,8), fig.align="center"}
+check_model(glm_first_a)
+```
+
+Verify that there is no side bias in the test arm visited first
+```{r}
+binom.test(sum(data_a$first_side=="l"), nrow(data_a), p = 0.5, alternative = "two.sided")
+```
+
+*There was no side bias in the first arm visited.*\
+
+## Parent odour discrimination (trial B)
+
+### Time spent with odour
+
+Mean time (and SD) spent by chicks in each arm
+```{r}
+mean_np <- mean(data_b$np_duration)
+sd_np <- sd(data_b$np_duration)
+mean_p <- mean(data_b$p_duration)
+sd_p <- sd(data_b$p_duration)
+data.frame(Variable = c("Time spent with unfamiliar adult odour (s)", "Time spent with parent odour (s)"),
+           Mean = c(mean_np, mean_p),
+           SD = c(sd_np, sd_p))
+
+```
+
+Verify that the response variable is normally distributed
+```{r, fig.dim = c(6, 2.5), fig.align="center"}
+x <- ggplot(data_b, aes(x=prop_dur_np)) + 
+  geom_histogram(binwidth=0.2, alpha=.2, fill="black") + 
+  theme_classic() + ggtitle("Histogram") + 
+  xlab("Proportion of time spent with \n unrelated adult odour") + ylab("Count")
+y <- ggqqplot(data_b$prop_dur_np, color = "black") +
+  theme_classic() + ggtitle("Q-Q plot")
+ggarrange(x, y, ncol = 2, nrow = 1)
+```
+
+Verify that there is no outlier
+```{r}
+check_outliers(data_b$prop_dur_np)
+```
+
+T-test (two-tailed one sample)
+```{r}
+t.test(data_b$prop_dur_np, mu = 0.5, alternative = "two.sided") 
+```
+
+*Chicks spent has much time in the arm with the unrelated adult odour as in the arm with the parent odour, they showed no preference.*\
+
+To run a beta regression, we need to transform the response variable (proportion of time spent with the unrelated adult odour) so that it does not include any 0 or 1.
+
+Transformation (y*(n-1)+0.5)/n (y: response variable, n: sample size; Smithson and Verkuilen 2006)
+```{r}
+data_b_sex$prop_dur_np_transf<-(data_b_sex$prop_dur_np*(nrow(data_b_sex)-1)+0.5)/nrow(data_b_sex)
+```
+
+Beta regression
+```{r}
+beta_dur_b <- glmmTMB(prop_dur_np_transf ~  odour_sex_comb + trial_np_diffdate, data = data_b_sex,
+                      family = beta_family(link = "logit"))
+summary(beta_dur_b)
+```
+
+Beta estimates (with confidence intervals) of fixed effects
+```{r}
+broom.mixed::tidy(beta_dur_b, conf.int = TRUE)
+```
+
+*The sex and the freshness of the test odours had no effect on the time chicks spent with the test odours.*\
+
+Check model assumptions
+```{r, fig.dim = c(8,6), fig.align="center"}
+check_model(beta_dur_b)
+```
+
+Verify that there is no side bias: create the response variable (proportion of time spent on the left side) and run a one-sample t-test
+```{r}
+data_b$prop_left <- data_b$left_duration/(data_b$left_duration + data_b$right_duration)
+t.test(data_b$prop_left, mu = 0.5, alternative = "two.sided")
+```
+
+*There was no significant side bias in the time spent in the test arms.*\
+
+### Odour visited first
+
+Distribution of the response variable (binary)
+```{r}
+table(data_b_sex$first_type)
+```
+
+Two-tailed binomial test
+```{r}
+binom.test(sum(data_b$first_type=="np"), nrow(data_b), p = 0.5, alternative = "two.sided")
+```
+
+*Chicks did not visit first the arm with the unrelated adult odour more than the arm with parent odour.*\
+
+GLM (binomial)
+```{r}
+glm_first_b <- glm(first_type ~ odour_sex_comb + trial_np_diffdate, data = data_b_sex, 
+                   family = binomial(link = "logit"))
+summary(glm_first_b)
+```
+
+Beta estimates (with confidence intervals) of fixed effects
+```{r}
+broom.mixed::tidy(glm_first_b, conf.int = TRUE)
+```
+
+*The sex and the freshness of the unrelated adult odour had no effect on which odour they visited first.*\
+
+Check model assumptions
+```{r, fig.dim = c(8, 8), fig.align="center"}
+check_model(glm_first_b)
+```
+
+Verify that there is no side bias in the test arm visited first
+```{r}
+binom.test(sum(data_b$first_side=="l"), nrow(data_b), p = 0.5, alternative = "two.sided")
+```
+
+*There was no side bias in the first arm visited.*\
+
+
+## Probability and latency to leave the acclimation chamber
+
+*In this exploratory analysis, we want to test if the sex and age of the chick has an effect on the probability and latency to leave the acclimation chamber, when they were in the Y-maze for the first time (novel environment).*
+
+### Probability to leave the acclimation chamber
+
+Subset data on all trials A where the sex of the chick is known (N = 42 chicks)
+```{r}
+data_prob <- data[data$trial_type == "A" & !is.na(data$sex),]
+```
+
+Distribution of the variable (binary)
+```{r}
+table(data_prob$trial_success, data_prob$sex)
+```
+
+GLMM (binomial)
+```{r}
+prob <- lme4::glmer(trial_success ~ sex + age + (1|nest), family = binomial(link = "logit"), data = data_prob)
+summary(prob)
+```
+
+Beta estimates (with confidence intervals) of fixed effects
+```{r}
+broom.mixed::tidy(prob, conf.int = TRUE)
+```
+
+Calculate the exponential of the log-odds ratio to get the odds ratio for sex (with 95% confidence interval)
+```{r}
+exp(summary(prob)$coefficients["sexm",1] + 
+      qnorm(c(0.025,0.5,0.975)) * summary(prob)$coefficients["sexm",2])
+```
+
+*Odds of leaving the chamber are 89% (estimate = 0.11, 95% CI = [0.02, 0.77]) lower if the chick is a male (12/23 = 52% of the males left the chamber) compared to a female (16/19 = 84% of females left the chamber).*\
+
+Calculate the exponential of the log-odds ratio to get the odds ratio for age (with 95% confidence interval)
+```{r}
+exp(summary(prob)$coefficients["age",1] + 
+      qnorm(c(0.025,0.5,0.975)) * summary(prob)$coefficients["age",2])
+```
+*Odds of leaving the chamber were 17% (estimate = 0.83, 95% CI = [0.74, 0.93]) lower if chicks were one day older.*\
+
+Check model assumptions
+```{r, fig.dim = c(8, 8), fig.align="center"}
+check_model(prob)
+```
+
+Check overdispersion
+```{r}
+check_overdispersion(prob)
+```
+
+### Latency to leave the acclimatiom chamber
+
+Subset data on all successful trials A where the sex of the chick is known (N = 28, including 16 females and 12 males) 
+```{r}
+data_lat <- data[data$trial_type == "A" & data$trial_success == 1 & !is.na(data$sex),]
+table(data_lat$sex)
+```
+
+Distribution of the response variable
+```{r, fig.dim = c(4, 2.5), fig.align="center"}
+ggplot(data_lat, aes(x=out_time)) + 
+  geom_histogram(binwidth=120, alpha=.2, fill="black") + 
+  theme_classic() + ggtitle("Histogram") + 
+  xlab("Latency to leave the acclimation chamber (s)") + ylab("Count")
+```
+
+GLMM (gamma)
+```{r}
+lat <- lme4::glmer(out_time ~ sex + age + (1|nest), family = Gamma(link=log), data = data_lat)
+summary(lat)
+```
+
+Beta estimates (with confidence intervals) of fixed effects
+```{r}
+broom.mixed::tidy(lat, conf.int = TRUE)
+```
+
+Exponentiate the log-estimates to get the estimates for sex (with confidence intervals)
+```{r}
+exp(summary(lat)$coefficients["sexm",1] + 
+    qnorm(c(0.025,0.5,0.975)) * summary(lat)$coefficients["sexm",2])
+```
+
+*Males wait 3 times longer (estimate = 3.32, 95% CI = [1.05, 10.56]) before leaving the chamber than females.*\
+
+Exponentiate the log-estimates to get the estimates for age (with confidence intervals)
+```{r}
+exp(summary(lat)$coefficients["age",1] + 
+    qnorm(c(0.025,0.5,0.975)) * summary(lat)$coefficients["age",2])
+```
+
+*Chicks waited 23% longer (estimate = 1.23, 95% CI = [1.08, 1.39]) before leaving the chamber if they were one day older.*\
+
+Check model assumptions
+```{r, fig.dim = c(8, 8), fig.align="center"}
+check_model(lat)
+```
+
+Check for multicollinearity (sex and age)
+```{r}
+t.test(data_lat[data_lat$sex=="f",]$age, data_lat[data_lat$sex=="m",]$age)
+```
+
+*Because the model on the latency to leave included only chicks that left the chamber, and because older males were less likely to leave the chamber, the average age of males (3.6 days old) that left the chamber was somewhat higher than that of females (6.8 days old), although not significantly.*\
+
+Plot sex and age effect on latency to leave
+```{r, fig.dim = c(5,5), fig.align="center"}
+ggplot(data_lat, aes(x = age, y = out_time, colour = sex)) +
+  geom_point(alpha = 0.8, cex = 3, position=position_jitter(h=0.75,w=0.75)) +
+  xlim(0,25) +
+  geom_smooth(method=lm, color = "black", size = 0.6, se=T, alpha = 0.15) +
+  scale_color_manual(labels = c("Female", "Male"), values = c("#E67394","#7785BF")) +
+  labs(x="Age (days)", y="Latency to leave the acclimation chamber (s)", color = "Sex") +
+  theme_classic()+
+  theme(axis.title.y = element_text(size = 16, margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.y = element_text(size = 14, colour = "black"),
+        axis.line.y = element_line(linewidth = 0.6),
+        axis.ticks.y = element_line(linewidth = 0.6),
+        axis.title.x = element_text(size = 16,  margin = margin(t = 10, r = 0, b = 0, l = 0)),
+        axis.text.x = element_text(size = 14, colour = "black"),
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.position = c(0.8, 0.15),
+        legend.background = element_rect(size=0.5, linetype="solid", colour ="black"))+ 
+  coord_capped_cart(bottom=capped_horizontal(capped="both"), left=capped_vertical(capped="both"))
+```
+
+
+# Plot 
+
+Prepare new variables for the x scale of the plot
+```{r}
+data_plot$point <- factor(data_plot$odour_type,levels = c("np","c", "p"))
+data_plot <- data_plot %>%  mutate(point = recode(point, "np" = 1,"c" = 2, "p" = 2))
+data_plot$lp <- data_plot$point + 0.1 * ifelse(data_plot$point == 1, 1.2, -1.2)
+data_plot$box <- data_plot$point + 0.1 * ifelse(data_plot$point == 1, -1.2, 1.2)
+```
+
+Colour palette
+```{r}
+fill <- c("#E67394","#F2C443","#7785BF")
+stroke <-c("black","black","black")
+```
+
+Plot
+```{r, fig.dim = c(7, 5.5), fig.align="center"}
+ggplot(data_plot, aes(x=odour_type, y=duration, fill = odour_type, colour = odour_type)) +
+  facet_grid(~trial_type) +
+  geom_line(aes(x = lp, group=trial), position = "identity", col="#B7B7B7") +
+  geom_point(aes(x = lp, group=trial), shape=21, size=2.5, 
+             position = "identity", stroke = NA) +
+  geom_boxplot(aes(x = box, group=odour_type), width=.25, lwd = 0.6) +
+  theme_classic() +
+  theme(strip.background = element_blank(), strip.text.x = element_blank(), 
+        panel.spacing = unit(1, "lines")) +
+  scale_x_continuous(breaks = c(1,2), expand=c(0.09,0.09), 
+                     labels = c("Unrelated adult \n odour","No odour \n Parent odour")) +
+  scale_fill_manual(values = fill) +
+  scale_colour_manual(values = stroke) +
+  labs(x="", y="Time spent with odour (s)") +
+  coord_capped_cart(left='both') +
+  theme(axis.title.y = element_text(size = 16, margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.y = element_text(size = 13, colour = "black"),
+        axis.line.y = element_line(linewidth = 0.6),
+        axis.ticks.y = element_line(linewidth = 0.6),
+        axis.text.x = element_text(size = 13.5, colour = "black"),
+        axis.line.x=element_blank(),
+        axis.ticks.x =element_blank(),
+        legend.position = "none") +
+  annotate("text", x = 1.5, y=450, label = "ns") +
+  geom_segment(aes(x = 1.1, y = 435, xend = 1.9, yend = 435), size = 0.6)
+```
+
+
